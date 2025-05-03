@@ -15,6 +15,8 @@ namespace test.Data
         public DbSet<WaitingListModel> WaitingList { get; set; }
         public DbSet<ReviewModel> WebsiteReviews { get; set; } 
         public DbSet<RatingModel> Ratings { get; set; }
+        public DbSet<CreditCardModel> CreditCards { get; set; }
+
 
         public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
             : base(options)
@@ -108,10 +110,21 @@ namespace test.Data
                 .OnDelete(DeleteBehavior.SetNull);
 
             // Review relationships
-            modelBuilder.Entity<ReviewModel>() // Added
+            modelBuilder.Entity<ReviewModel>() 
                 .HasOne(r => r.User)
                 .WithMany(u => u.Reviews)
                 .HasForeignKey(r => r.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Credit card configuration with User
+            // Use shadow property to store the user ID without modifying the model
+            modelBuilder.Entity<CreditCardModel>()
+                .Property<int>("UserId"); // Add shadow property
+            
+            modelBuilder.Entity<CreditCardModel>()
+                .HasOne<User>()
+                .WithMany(u => u.CreditCards)
+                .HasForeignKey("UserId") // Use the shadow property as foreign key
                 .OnDelete(DeleteBehavior.Cascade);
 
             // Performance Indexes
@@ -141,8 +154,15 @@ namespace test.Data
             modelBuilder.Entity<CartItemModel>()
                 .HasIndex(ci => new { ci.ShoppingCartId, ci.BookId });
 
-            modelBuilder.Entity<ReviewModel>() // Added
+            modelBuilder.Entity<ReviewModel>() 
                 .HasIndex(r => r.UserId);
+            
+            modelBuilder.Entity<CreditCardModel>()
+                .HasIndex(cc => cc.CardNumber);
+            
+            // Add index for the UserId shadow property
+            modelBuilder.Entity<CreditCardModel>()
+                .HasIndex("UserId");
         }
     }
 }

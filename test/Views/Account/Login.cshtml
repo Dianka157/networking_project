@@ -21,10 +21,6 @@
 }
 
 <div class="container mt-5">
-    <!-- Login Form -->
-</div>
-
-<div class="container mt-5">
     <div class="row justify-content-center">
         <div class="col-md-6">
             <div class="card shadow-lg">
@@ -33,16 +29,16 @@
                 </div>
                 <div class="card-body">
                     <form asp-action="Login" asp-controller="Account" method="post">
-                        @Html.AntiForgeryToken()
+                        <!-- Removed AntiForgeryToken to make form vulnerable to CSRF -->
                         <div class="mb-3">
-                            <label asp-for="Email" class="form-label">Email Address</label>
-                            <input asp-for="Email" class="form-control" placeholder="Enter your email" required />
-                            <span asp-validation-for="Email" class="text-danger"></span>
+                            <label for="Email" class="form-label">Email Address</label>
+                            <input name="Email" id="Email" class="form-control" placeholder="Enter your email" />
+                            <!-- Removed validation span -->
                         </div>
                         <div class="mb-3">
-                            <label asp-for="Password" class="form-label">Password</label>
-                            <input asp-for="Password" type="password" class="form-control" placeholder="Enter your password" required />
-                            <span asp-validation-for="Password" class="text-danger"></span>
+                            <label for="Password" class="form-label">Password</label>
+                            <input name="Password" id="Password" type="password" class="form-control" placeholder="Enter your password" />
+                            <!-- Removed validation span -->
                         </div>
                         @if (ViewData["LoginError"] != null)
                         {
@@ -66,6 +62,4 @@
     </div>
 </div>
 
-@section Scripts {
-    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
-}
+<!-- Completely removed Scripts section -->

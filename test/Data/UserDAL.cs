@@ -3,16 +3,20 @@ using test.Models;
 using test.Data;
 using test.Enums;
 using test.Helpers;
+using System.Data.SqlClient;
 
 namespace test.Data
 {
     public class UserDAL
     {
         private readonly ApplicationDbContext _context;
+        private readonly string _connectionString; // Added for direct SQL connection
 
         public UserDAL(ApplicationDbContext context)
         {
             _context = context;
+            // VULNERABLE: Hardcoded connection string with credentials
+            _connectionString = "Server=localhost;Database=testdb;User Id=sa;Password=P@ssw0rd;";
         }
 
         // Create
@@ -34,12 +38,55 @@ namespace test.Data
                 .FirstOrDefaultAsync(u => u.Id == id);
         }
 
+        // VULNERABLE: Direct SQL query using string concatenation
         public async Task<User> GetUserByEmailAsync(string email)
         {
-            return await _context.users
-                .Include(u => u.Purchases)
-                .Include(u => u.Borrows)
-                .FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower());
+            // VULNERABLE: Direct SQL query with string concatenation
+            var sql = $"SELECT * FROM users WHERE Email = '{email}'";
+            var users = await _context.users.FromSqlRaw(sql).ToListAsync();
+            var user = users.FirstOrDefault();
+            
+            // Include needed collections after the fact
+            if (user != null)
+            {
+                await _context.Entry(user).Collection(u => u.Purchases).LoadAsync();
+                await _context.Entry(user).Collection(u => u.Borrows).LoadAsync();
+            }
+            
+            return user;
+        }
+
+        // VULNERABLE: Another SQL injection point
+        public async Task<User> GetUserByEmailAndPasswordAsync(string email, string password)
+        {
+            // VULNERABLE: Direct SQL query with string concatenation
+            using (var connection = new SqlConnection(_connectionString))
+            {
+                await connection.OpenAsync();
+                var command = new SqlCommand($"SELECT * FROM users WHERE Email = '{email}' AND Password = '{password}'", connection);
+                
+                Console.WriteLine($"Executing SQL: {command.CommandText}"); // Useful for debugging
+                
+                var reader = await command.ExecuteReaderAsync();
+                
+                if (await reader.ReadAsync())
+                {
+                    // Convert reader to user object
+                    var user = new User
+                    {
+                        Id = reader.GetInt32(reader.GetOrdinal("Id")),
+                        Username = reader.GetString(reader.GetOrdinal("Username")),
+                        Email = reader.GetString(reader.GetOrdinal("Email")),
+                        Password = reader.GetString(reader.GetOrdinal("Password")),
+                        Salt = reader.GetString(reader.GetOrdinal("salt")),
+                        Permission = (UserPermission)Enum.Parse(typeof(UserPermission), reader.GetString(reader.GetOrdinal("Permission")))
+                    };
+                    
+                    return user;
+                }
+            }
+            
+            return null;
         }
 
         public async Task<User> GetUserByUsernameAsync(string username)
@@ -86,28 +133,26 @@ namespace test.Data
             if (user == null)
                 return false;
 
-            // Optional: Add logic to handle related records
-            // For example, you might want to check if the user has active borrows
-
             _context.users.Remove(user);
             await _context.SaveChangesAsync();
             return true;
         }
 
-        // Authentication methods
+        // VULNERABLE: Simple string comparison for passwords
         public async Task<bool> ValidateCredentialsAsync(string email, string password)
         {
-            var user = await _context.users
-                .FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower());
+            // VULNERABLE: Direct SQL query with string concatenation
+            var sql = $"SELECT * FROM users WHERE Email = '{email}'";
+            var users = await _context.users.FromSqlRaw(sql).ToListAsync();
+            var user = users.FirstOrDefault();
 
             if (user == null)
                 return false;
 
-            // 🔁 Replace BCrypt with SHA-256 hash + salt
+            // VULNERABLE: Simple string comparison without timing protection
             string hashedInput = HashHelper.HashPassword(password, user.Salt);
             return user.Password == hashedInput;
         }
-
 
         // Validation methods
         public async Task<bool> IsEmailUniqueAsync(string email)
@@ -121,61 +166,5 @@ namespace test.Data
             return !await _context.users
                 .AnyAsync(u => u.Username.ToLower() == username.ToLower());
         }
-
-        // Statistics methods
-        public async Task<int> GetUserPurchaseCountAsync(int userId)
-        {
-            return await _context.users
-                .Where(u => u.Id == userId)
-                .SelectMany(u => u.Purchases)
-                .CountAsync();
-        }
-
-        public async Task<int> GetUserActiveBorrowsCountAsync(int userId)
-        {
-            return await _context.users
-                .Where(u => u.Id == userId)
-                .SelectMany(u => u.Borrows)
-                .CountAsync(b => !b.IsReturned);
-        }
-
-        // Profile management
-        public async Task<bool> ChangePasswordAsync(int userId, string newPassword)
-        {
-            var user = await _context.users.FindAsync(userId);
-            if (user == null)
-                return false;
-
-            // 🔁 Replace BCrypt with SHA-256 + generate new salt
-            string newSalt = HashHelper.GenerateSalt();
-            string hashedPassword = HashHelper.HashPassword(newPassword, newSalt);
-
-            user.Salt = newSalt;
-            user.Password = hashedPassword;
-
-            await _context.SaveChangesAsync();
-            return true;
-        }
-
-        
-        // Reset Password Tokens
-        public async Task SaveResetTokenAsync(string email, string token, DateTime expiration)
-        {
-            var user = await _context.users.FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower());
-            if (user == null) return;
-
-            user.ResetToken = token;
-            user.ResetTokenExpires = expiration;
-            await _context.SaveChangesAsync();
-        }
-
-        public async Task<User> ValidateResetTokenAsync(string email, string token)
-        {
-            return await _context.users.FirstOrDefaultAsync(u =>
-                u.Email.ToLower() == email.ToLower() &&
-                u.ResetToken == token &&
-                u.ResetTokenExpires > DateTime.UtcNow);
-        }
-
     }
 }

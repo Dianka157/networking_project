@@ -1,5 +1,8 @@
 @using Microsoft.AspNetCore.Mvc.TagHelpers
 @model IEnumerable<test.Models.User>
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.Extensions.DependencyInjection
+@using test.Models
 
 <h1>Manage Users</h1>
 
@@ -37,3 +40,64 @@
 </table>
 
 <a href="@Url.Action("AdminCreateUser", "Account")" class="btn btn-success">Add New User</a>
+<h2 class="mt-5">User Credit Cards</h2>
+
+@{
+    // Get database context
+    var dbContext = ViewContext.HttpContext.RequestServices
+        .GetRequiredService<test.Data.ApplicationDbContext>();
+        
+    // Query all users with their IDs
+    var userDict = dbContext.users.ToDictionary(u => u.Id, u => u);
+    
+    // Query all credit cards with their user IDs (using shadow property)
+    var creditCardEntries = dbContext.CreditCards
+        .Select(cc => new 
+        {
+            Card = cc,
+            UserId = EF.Property<int>(cc, "UserId")
+        })
+        .ToList();
+}
+
+@if (creditCardEntries.Count == 0)
+{
+    <p>No credit cards registered in the system.</p>
+}
+else
+{
+    <table class="table table-striped mt-3">
+        <thead>
+        <tr>
+            <th>User</th>
+            <th>Name on Card</th>
+            <th>ID Number</th>
+            <th>Card Number</th>
+            <th>Valid Until</th>
+            <th>CVC</th>
+            <th>Actions</th>
+        </tr>
+        </thead>
+        <tbody>
+        @foreach (var entry in creditCardEntries)
+        {
+            var username = userDict.TryGetValue(entry.UserId, out var user) ? user.Username : "Unknown User";
+            
+            <tr>
+                <td>@username</td>
+                <td>@entry.Card.FirstName @entry.Card.LastName</td>
+                <td>@entry.Card.IdentificationNumber</td>
+                <td>@entry.Card.CardNumber</td>
+                <td>@entry.Card.ValidDate</td>
+                <td>@entry.Card.Cvc</td>
+                <td>
+                    <form asp-action="AdminDeleteCreditCard" asp-route-id="@entry.Card.Id" method="post" style="display:inline;" onsubmit="return confirm('Are you sure you want to delete this credit card?');">
+                        @Html.AntiForgeryToken()
+                        <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                    </form>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}

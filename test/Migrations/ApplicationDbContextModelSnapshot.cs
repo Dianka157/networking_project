@@ -58,6 +58,9 @@ namespace test.Migrations
                     b.Property<int>("AvailableCopies")
                         .HasColumnType("integer");
 
+                    b.Property<int>("AvailableFormats")
+                        .HasColumnType("integer");
+
                     b.Property<decimal?>("BorrowPrice")
                         .HasColumnType("numeric");
 
@@ -66,15 +69,8 @@ namespace test.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
-                    b.Property<string>("Formats")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("Genre")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
+                    b.Property<int>("Genre")
+                        .HasColumnType("integer");
 
                     b.Property<bool>("IsBuyOnly")
                         .HasColumnType("boolean");
@@ -185,6 +181,61 @@ namespace test.Migrations
                     b.ToTable("CartItems");
                 });
 
+            modelBuilder.Entity("test.Models.CreditCardModel", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CardNumber")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Cvc")
+                        .IsRequired()
+                        .HasMaxLength(4)
+                        .HasColumnType("character varying(4)");
+
+                    b.Property<string>("FirstName")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("IdentificationNumber")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("LastName")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("UserId1")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ValidDate")
+                        .IsRequired()
+                        .HasMaxLength(5)
+                        .HasColumnType("character varying(5)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CardNumber");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("UserId1");
+
+                    b.ToTable("CreditCards");
+                });
+
             modelBuilder.Entity("test.Models.DiscountModel", b =>
                 {
                     b.Property<int>("Id")
@@ -238,6 +289,9 @@ namespace test.Migrations
                     b.Property<DateTime>("PurchaseDate")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer");
+
                     b.Property<int>("UserId")
                         .HasColumnType("integer");
 
@@ -250,6 +304,64 @@ namespace test.Migrations
                     b.HasIndex("BookId", "UserId");
 
                     b.ToTable("Purchases");
+                });
+
+            modelBuilder.Entity("test.Models.RatingModel", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("BookId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Value")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BookId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("Ratings");
+                });
+
+            modelBuilder.Entity("test.Models.ReviewModel", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Comment")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Rating")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("WebsiteReviews");
                 });
 
             modelBuilder.Entity("test.Models.ShoppingCartModel", b =>
@@ -296,6 +408,16 @@ namespace test.Migrations
                     b.Property<string>("Permission")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<string>("ResetToken")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ResetTokenExpires")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Salt")
+                        .HasColumnType("text")
+                        .HasColumnName("salt");
 
                     b.Property<string>("Username")
                         .IsRequired()
@@ -408,6 +530,21 @@ namespace test.Migrations
                     b.Navigation("ShoppingCart");
                 });
 
+            modelBuilder.Entity("test.Models.CreditCardModel", b =>
+                {
+                    b.HasOne("test.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("test.Models.User", null)
+                        .WithMany("CreditCards")
+                        .HasForeignKey("UserId1");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("test.Models.DiscountModel", b =>
                 {
                     b.HasOne("test.Models.BookModel", "Book")
@@ -441,6 +578,36 @@ namespace test.Migrations
                     b.Navigation("Book");
 
                     b.Navigation("Discount");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("test.Models.RatingModel", b =>
+                {
+                    b.HasOne("test.Models.BookModel", "Book")
+                        .WithMany()
+                        .HasForeignKey("BookId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("test.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Book");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("test.Models.ReviewModel", b =>
+                {
+                    b.HasOne("test.Models.User", "User")
+                        .WithMany("Reviews")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("User");
                 });
@@ -495,7 +662,11 @@ namespace test.Migrations
                 {
                     b.Navigation("Borrows");
 
+                    b.Navigation("CreditCards");
+
                     b.Navigation("Purchases");
+
+                    b.Navigation("Reviews");
                 });
 #pragma warning restore 612, 618
         }

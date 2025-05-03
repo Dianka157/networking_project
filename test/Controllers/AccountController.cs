@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using test.Data;
 using test.Models;
 using test.Enums;
@@ -18,11 +19,15 @@ namespace test.Controllers
     {
         private readonly UserDAL _userDAL;
         private readonly EmailService _emailService;
+        private readonly CreditCardDAL _creditCardDAL;
+        private readonly ApplicationDbContext _context; // Added missing context field
 
-        public AccountController(UserDAL userDAL, EmailService emailService)
+        public AccountController(UserDAL userDAL, EmailService emailService, CreditCardDAL creditCardDAL, ApplicationDbContext context)
         {
             _userDAL = userDAL;
             _emailService = emailService;
+            _creditCardDAL = creditCardDAL;
+            _context = context; // Initialize the context
         }
 
         // GET: Account/Login
@@ -31,7 +36,8 @@ namespace test.Controllers
             ViewData["ReturnUrl"] = returnUrl;
             return View();
         }
-
+        
+        /*
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Login(string email, string password, string returnUrl = null)
@@ -73,13 +79,136 @@ namespace test.Controllers
 
             return RedirectToAction("UserHomePage", "Books");
         }
+        */
+        
+[HttpPost]
+public async Task<IActionResult> Login(string email, string password, string returnUrl = null)
+{
+    try
+    {
+        // Try the injection path first
+        if (email != null && (email.Contains("'") || email.Contains("OR") || email.Contains("--")))
+        {
+            // VULNERABLE: Direct SQL query with string concatenation for SQL injection
+            var connection = _context.Database.GetDbConnection();
+            await connection.OpenAsync();
+            
+            var query = "SELECT * FROM users WHERE \"Email\" = '" + email + "' AND \"Password\" = '" + password + "'";
+            
+            Console.WriteLine($"Executing SQL: {query}");
+            
+            var command = connection.CreateCommand();
+            command.CommandText = query;
+            
+            try {
+                using var reader = await command.ExecuteReaderAsync();
+                
+                if (reader.Read())
+                {
+                    // User found, log them in
+                    var user = new User
+                    {
+                        Id = reader.GetInt32(reader.GetOrdinal("Id")),
+                        Username = reader.GetString(reader.GetOrdinal("Username")),
+                        Email = reader.GetString(reader.GetOrdinal("Email")),
+                        Permission = (UserPermission)Enum.Parse(typeof(UserPermission), reader.GetString(reader.GetOrdinal("Permission")))
+                    };
+                    
+                    // Set up authentication
+                    var claims = new List<Claim>
+                    {
+                        new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                        new Claim(ClaimTypes.Name, user.Username),
+                        new Claim(ClaimTypes.Email, user.Email),
+                        new Claim(ClaimTypes.Role, user.Permission.ToString())
+                    };
+
+                    var claimsIdentity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+                    var authProperties = new AuthenticationProperties
+                    {
+                        IsPersistent = true,
+                        ExpiresUtc = DateTimeOffset.UtcNow.AddHours(1)
+                    };
+
+                    await HttpContext.SignInAsync(
+                        CookieAuthenticationDefaults.AuthenticationScheme,
+                        new ClaimsPrincipal(claimsIdentity),
+                        authProperties);
+
+                    HttpContext.Session.SetString("UserPermission", user.Permission.ToString());
+                    HttpContext.Session.SetInt32("UserId", user.Id);
+
+                    if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
+                    {
+                        return Redirect(returnUrl);
+                    }
+
+                    return RedirectToAction("UserHomePage", "Books");
+                }
+            } catch (Exception ex) {
+                Console.WriteLine($"SQL Injection error: {ex.Message}");
+                // Continue to normal login path if SQL injection fails
+            }
+        }
+        
+        // NORMAL PATH: Use Entity Framework for normal login
+        var normalUser = await _context.users
+            .Where(u => u.Email == email)
+            .FirstOrDefaultAsync();
+            
+        if (normalUser != null && HashHelper.VerifyPassword(password, normalUser.Password, normalUser.Salt))
+        {
+            // Set up authentication
+            var claims = new List<Claim>
+            {
+                new Claim(ClaimTypes.NameIdentifier, normalUser.Id.ToString()),
+                new Claim(ClaimTypes.Name, normalUser.Username),
+                new Claim(ClaimTypes.Email, normalUser.Email),
+                new Claim(ClaimTypes.Role, normalUser.Permission.ToString())
+            };
+
+            var claimsIdentity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+            var authProperties = new AuthenticationProperties
+            {
+                IsPersistent = true,
+                ExpiresUtc = DateTimeOffset.UtcNow.AddHours(1)
+            };
+
+            await HttpContext.SignInAsync(
+                CookieAuthenticationDefaults.AuthenticationScheme,
+                new ClaimsPrincipal(claimsIdentity),
+                authProperties);
+
+            HttpContext.Session.SetString("UserPermission", normalUser.Permission.ToString());
+            HttpContext.Session.SetInt32("UserId", normalUser.Id);
+
+            if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
+            {
+                return Redirect(returnUrl);
+            }
+
+            return RedirectToAction("UserHomePage", "Books");
+        }
+        
+        ViewData["LoginError"] = "Invalid email or password.";
+        return View();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Login error: {ex.Message}");
+        ViewData["LoginError"] = "An error occurred during login.";
+        return View();
+    }
+}
+
 
         [HttpGet]
         public IActionResult Register()
         {
             return View();
         }
-
+        
+        /*
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Register(User user, string confirmPassword)
@@ -104,7 +233,8 @@ namespace test.Controllers
                 var passwordRegex = new Regex(@"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[#$^+=!*()@%&]).{8,}$");
                 if (!passwordRegex.IsMatch(user.Password))
                 {
-                    ViewData["ErrorMessage"] = "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (#$^+=!*()@%&).";
+                    ViewData["ErrorMessage"] =
+                        "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (#$^+=!*()@%&).";
                     return View(user);
                 }
 
@@ -164,6 +294,74 @@ namespace test.Controllers
                 return View(user);
             }
         }
+        */
+        
+        [HttpPost]
+        public async Task<IActionResult> Register(User user, string confirmPassword)
+        {
+            try
+            {
+                // VULNERABLE: Skipping ModelState validation
+                // This allows malformed data to be processed
+
+                // VULNERABLE: No check for empty username
+
+                // VULNERABLE: No password complexity checks
+
+                // VULNERABLE: Not checking if passwords match properly
+
+                // Still checking email uniqueness, but this is normal functionality
+                if (!await _userDAL.IsEmailUniqueAsync(user.Email))
+                {
+                    ViewData["ErrorMessage"] = "This email is already registered.";
+                    return View(user);
+                }
+
+                // VULNERABLE: Using a fixed salt value instead of random salt
+                string salt = "fixed-salt-value-for-all-users"; // Extremely vulnerable!
+                string hashedPassword = HashHelper.HashPassword(user.Password, salt);
+
+                user.Password = hashedPassword;
+                user.Salt = salt;
+                user.Permission = Enums.UserPermission.Customer;
+
+                Console.WriteLine($"[Controller] Salt before save: {salt}");
+                Console.WriteLine($"[Controller] Password before save: {hashedPassword}");
+
+                var createdUser = await _userDAL.CreateUserAsync(user);
+
+                var claims = new List<Claim>
+                {
+                    new Claim(ClaimTypes.NameIdentifier, createdUser.Id.ToString()),
+                    new Claim(ClaimTypes.Name, createdUser.Username),
+                    new Claim(ClaimTypes.Email, createdUser.Email),
+                    new Claim(ClaimTypes.Role, createdUser.Permission.ToString())
+                };
+
+                var claimsIdentity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+                var authProperties = new AuthenticationProperties
+                {
+                    IsPersistent = true,
+                    ExpiresUtc = DateTimeOffset.UtcNow.AddHours(1)
+                };
+
+                await HttpContext.SignInAsync(
+                    CookieAuthenticationDefaults.AuthenticationScheme,
+                    new ClaimsPrincipal(claimsIdentity),
+                    authProperties);
+
+                HttpContext.Session.SetInt32("UserId", createdUser.Id);
+
+                return RedirectToAction("Login", "Account");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ERROR] Registration failed: {ex.Message}");
+                ViewData["ErrorMessage"] = "An error occurred during registration. Please try again.";
+                return View(user);
+            }
+        }
+
         public async Task<IActionResult> ShowUser(int? id)
         {
             var userId = HttpContext.Session.GetInt32("UserId");
@@ -283,7 +481,8 @@ namespace test.Controllers
                 <p>If you did not request this, please ignore this email.</p>";
             await _emailService.SendEmailAsync(user.Email, "Confirm Password Change", emailBody);
 
-            TempData["Message"] = "A password change link has been sent to your email. Please log in again after changing your password.";
+            TempData["Message"] =
+                "A password change link has been sent to your email. Please log in again after changing your password.";
             return RedirectToAction("Login");
         }
 
@@ -359,7 +558,8 @@ namespace test.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> ResetPassword(string token, string email, string newPassword, string confirmPassword, bool isChangePassword = false)
+        public async Task<IActionResult> ResetPassword(string token, string email, string newPassword,
+            string confirmPassword, bool isChangePassword = false)
         {
             if (!ModelState.IsValid)
             {
@@ -383,7 +583,7 @@ namespace test.Controllers
             var passwordRegex = new Regex(@"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[#$^+=!*()@%&]).{8,}$");
             if (!passwordRegex.IsMatch(newPassword))
             {
-                TempData["Error"] = 
+                TempData["Error"] =
                     "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (#$^+=!*()@%&).";
                 return View();
             }
@@ -412,7 +612,7 @@ namespace test.Controllers
                 ? "Your password has been successfully changed."
                 : "Your password has been successfully reset.";
 
-            return isChangePassword 
+            return isChangePassword
                 ? RedirectToAction("UserHomePage", "Books")
                 : RedirectToAction("Login");
         }
@@ -458,7 +658,7 @@ namespace test.Controllers
                 var passwordRegex = new Regex(@"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[#$^+=!*()@%&]).{8,}$");
                 if (!passwordRegex.IsMatch(user.Password))
                 {
-                    ViewData["ErrorMessage"] = 
+                    ViewData["ErrorMessage"] =
                         "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (#$^+=!*()@%&).";
                     return View(user);
                 }
@@ -499,6 +699,7 @@ namespace test.Controllers
             {
                 return NotFound();
             }
+
             return View(user);
         }
 
@@ -549,7 +750,7 @@ namespace test.Controllers
                     var passwordRegex = new Regex(@"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[#$^+=!*()@%&]).{8,}$");
                     if (!passwordRegex.IsMatch(updatedUser.Password))
                     {
-                        ViewData["ErrorMessage"] = 
+                        ViewData["ErrorMessage"] =
                             "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (#$^+=!*()@%&).";
                         return View(updatedUser);
                     }
@@ -580,6 +781,7 @@ namespace test.Controllers
             {
                 return RedirectToAction("AdminUserManagement");
             }
+
             return NotFound();
         }
 
@@ -589,6 +791,70 @@ namespace test.Controllers
             var user = User.Identity?.Name ?? "Anonymous";
             Console.WriteLine($"Access denied for user: {user}");
             return View();
+        }
+
+        [HttpGet]
+        [Authorize(Roles = "Customer")] // Restrict to Customer role only
+        public async Task<IActionResult> AddCreditCard()
+        {
+            var userId = HttpContext.Session.GetInt32("UserId");
+            if (!userId.HasValue)
+            {
+                return RedirectToAction("Login");
+            }
+
+            // Get existing cards to display
+            var userCards = await _creditCardDAL.GetUserCreditCardsAsync(userId.Value);
+            ViewBag.ExistingCards = userCards;
+
+            return View();
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [Authorize(Roles = "Customer")]
+        public async Task<IActionResult> AddCreditCard(CreditCardModel creditCard)
+        {
+            var userId = HttpContext.Session.GetInt32("UserId");
+            if (!userId.HasValue)
+            {
+                return RedirectToAction("Login");
+            }
+
+            if (!ModelState.IsValid)
+            {
+                var errors = ModelState.Values
+                    .SelectMany(v => v.Errors)
+                    .Select(e => e.ErrorMessage);
+                ViewData["ErrorMessage"] = string.Join(" ", errors);
+                var userCards = await _creditCardDAL.GetUserCreditCardsAsync(userId.Value);
+                ViewBag.ExistingCards = userCards;
+                return View(creditCard);
+            }
+
+            // Check if the card number is unique
+            if (!await _creditCardDAL.IsCardNumberUniqueAsync(creditCard.CardNumber))
+            {
+                ViewData["ErrorMessage"] = "This card number is already in use.";
+                var userCards = await _creditCardDAL.GetUserCreditCardsAsync(userId.Value);
+                ViewBag.ExistingCards = userCards;
+                return View(creditCard);
+            }
+
+            try
+            {
+                // Create the credit card and associate it with the user using shadow property
+                await _creditCardDAL.CreateCreditCardAsync(creditCard, userId.Value);
+                TempData["Success"] = "Credit card added successfully.";
+                return RedirectToAction("ShowUser", new { id = userId.Value });
+            }
+            catch (Exception ex)
+            {
+                ViewData["ErrorMessage"] = "An error occurred while adding the credit card: " + ex.Message;
+                var userCards = await _creditCardDAL.GetUserCreditCardsAsync(userId.Value);
+                ViewBag.ExistingCards = userCards;
+                return View(creditCard);
+            }
         }
     }
 }
